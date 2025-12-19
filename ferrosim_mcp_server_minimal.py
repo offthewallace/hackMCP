@@ -53,6 +53,180 @@ def safe_serialize(obj):
     return obj
 
 # ============================================================================
+# Electric Field Generation
+# ============================================================================
+
+def generate_electric_field(field_type: str, time_vec: np.ndarray, params: dict) -> np.ndarray:
+    """
+    Generate custom electric field waveforms
+    
+    Args:
+        field_type: 'sine', 'step', 'polynomial', 'custom'
+        time_vec: Time vector
+        params: Parameters specific to field type
+        
+    Returns:
+        applied_field: (timesteps, 2) array with Ex and Ey components
+    """
+    n_steps = len(time_vec)
+    applied_field = np.zeros((n_steps, 2))
+    
+    if field_type == 'sine':
+        # Sinusoidal field: Ex = Ax*sin(2π*fx*t), Ey = Ay*sin(2π*fy*t + phase)
+        Ax = params.get('amplitude_x', 0.0)
+        Ay = params.get('amplitude_y', 10.0)
+        fx = params.get('freq_x', 1.0)
+        fy = params.get('freq_y', 1.0)
+        phase = params.get('phase', 0.0)
+        
+        applied_field[:, 0] = Ax * np.sin(2 * np.pi * fx * time_vec)
+        applied_field[:, 1] = Ay * np.sin(2 * np.pi * fy * time_vec + phase)
+        
+    elif field_type == 'step':
+        # Step function: field applied for first fraction of time, then removed
+        Ex = params.get('Ex', 0.0)
+        Ey = params.get('Ey', 0.5)
+        step_fraction = params.get('step_fraction', 0.25)
+        
+        step_idx = int(n_steps * step_fraction)
+        applied_field[:step_idx, 0] = Ex
+        applied_field[:step_idx, 1] = Ey
+        
+    elif field_type == 'polynomial':
+        # Polynomial modulated: A*(t+offset)^power * sin(2πf*t)
+        Ax = params.get('amplitude_x', 180.0)
+        Ay = params.get('amplitude_y', 180.0)
+        fx = params.get('freq_x', 2.0)
+        fy = params.get('freq_y', 2.0)
+        power = params.get('power', 2.0)
+        offset = params.get('offset', 0.5)
+        
+        time_mod = (time_vec + offset) ** power
+        applied_field[:, 0] = Ax * time_mod * np.sin(2 * np.pi * fx * time_vec)
+        applied_field[:, 1] = Ay * time_mod * np.cos(4 * np.pi * fy * time_vec)
+        
+    elif field_type == 'zero':
+        # Zero field (for ground state relaxation)
+        pass  # Already zeros
+        
+    else:
+        raise ValueError(f"Unknown field type: {field_type}")
+    
+    return applied_field
+
+# ============================================================================
+# Defect Generation
+# ============================================================================
+
+def generate_defects(defect_type: str, n: int, params: dict) -> list:
+    """
+    Generate defect configurations
+    
+    Args:
+        defect_type: 'none', 'random', 'periodic', 'custom'
+        n: Lattice size
+        params: Parameters specific to defect type
+        
+    Returns:
+        defect_list: List of (Ex, Ey) tuples for each site
+    """
+    n_sites = n * n
+    
+    if defect_type == 'none':
+        # No defects
+        return [(0.0, 0.0) for _ in range(n_sites)]
+        
+    elif defect_type == 'random':
+        # Random defects at random locations
+        num_defects = params.get('num_defects', 5)
+        strength_mean = params.get('strength_mean', 15.0)
+        strength_std = params.get('strength_std', 0.5)
+        
+        np.random.seed(params.get('seed', None))
+        defect_list = [(0.01, 0.01) for _ in range(n_sites)]
+        
+        # Randomly place defects
+        defect_indices = np.random.choice(n_sites, size=num_defects, replace=False)
+        for idx in defect_indices:
+            angle = np.random.rand() * 2 * np.pi
+            strength = np.random.normal(strength_mean, strength_std)
+            Ex = strength * np.cos(angle)
+            Ey = strength * np.sin(angle)
+            defect_list[idx] = (Ex, Ey)
+            
+        return defect_list
+        
+    elif defect_type == 'periodic':
+        # Periodic defects on a grid
+        row_spacing = params.get('row_spacing', 5)
+        col_spacing = params.get('col_spacing', 10)
+        strength_mean = params.get('strength_mean', 15.5)
+        strength_std = params.get('strength_std', 0.5)
+        
+        np.random.seed(params.get('seed', 42))
+        defect_list = []
+        
+        for row in range(n):
+            for col in range(n):
+                Efx = 0.01
+                Efy = 0.01
+                
+                # Place defects at periodic locations
+                if row % row_spacing == 0 and col % col_spacing == 0:
+                    Efy = np.random.normal(strength_mean, strength_std)
+                    
+                defect_list.append((Efx, Efy))
+                
+        return defect_list
+        
+    else:
+        raise ValueError(f"Unknown defect type: {defect_type}")
+
+# ============================================================================
+# Visualization Generation
+# ============================================================================
+
+def generate_visualization(sim: Ferro2DSim, viz_type: str, timestep: int = -1) -> str:
+    """
+    Generate visualization and return as base64-encoded PNG
+    
+    Args:
+        sim: FerroSim simulation object
+        viz_type: 'summary', 'quiver', 'magnitude_angle'
+        timestep: Which timestep to visualize (-1 for last)
+        
+    Returns:
+        base64_image: Base64-encoded PNG image
+    """
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend
+    import matplotlib.pyplot as plt
+    import io
+    import base64
+    
+    # Create figure based on visualization type
+    if viz_type == 'summary':
+        fig = sim.plot_summary()
+        
+    elif viz_type == 'quiver':
+        fig = sim.plot_quiver(time_step=timestep)
+        
+    elif viz_type == 'magnitude_angle':
+        fig, _, _ = sim.plot_mag_ang(time_step=timestep)
+        
+    else:
+        raise ValueError(f"Unknown visualization type: {viz_type}")
+    
+    # Convert to base64-encoded PNG
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close(fig)
+    
+    return img_base64
+
+# ============================================================================
 # Simulation Manager - Minimal Implementation
 # ============================================================================
 
@@ -63,29 +237,49 @@ class SimulationManager:
         self.simulations: Dict[str, Dict[str, Any]] = {}
     
     def create_simulation(self, params: dict) -> str:
-        """Create new simulation instance"""
+        """Create new simulation instance with advanced options"""
         sim_id = str(uuid.uuid4())[:8]
         
-        # Extract parameters with defaults
+        # Extract basic parameters with defaults
         n = params.get('n', 10)
         gamma = params.get('gamma', 1.0)
         k = params.get('k', 1.0)
         mode = params.get('mode', 'tetragonal')
         dep_alpha = params.get('dep_alpha', 0.0)
+        init_mode = params.get('init', 'pr')  # 'pr', 'random', 'up', 'down'
         
-        # Create time vector if not provided
+        # Create time vector
         if 'time_vec' in params:
             time_vec = np.array(params['time_vec'])
         else:
-            time_vec = np.linspace(0, 1.0, 1000)
+            t_start = params.get('t_start', 0.0)
+            t_end = params.get('t_end', 1.0)
+            n_steps = params.get('n_steps', 1000)
+            time_vec = np.linspace(t_start, t_end, n_steps)
         
-        # Create applied field if not provided
+        # Generate electric field
+        field_config = params.get('field_config', {})
         if 'applied_field' in params:
             applied_field = np.array(params['applied_field'])
+        elif field_config:
+            field_type = field_config.get('type', 'sine')
+            field_params = field_config.get('params', {})
+            applied_field = generate_electric_field(field_type, time_vec, field_params)
         else:
-            applied_field = np.zeros((len(time_vec), 2))
             # Default: sine wave in y direction
+            applied_field = np.zeros((len(time_vec), 2))
             applied_field[:, 1] = 10 * np.sin(time_vec * 2 * np.pi * 2)
+        
+        # Generate defects
+        defect_config = params.get('defect_config', {})
+        if 'defects' in params:
+            defects = params['defects']
+        elif defect_config:
+            defect_type = defect_config.get('type', 'none')
+            defect_params = defect_config.get('params', {})
+            defects = generate_defects(defect_type, n, defect_params)
+        else:
+            defects = [(0, 0) for _ in range(n * n)]
         
         # Create simulation
         try:
@@ -97,7 +291,8 @@ class SimulationManager:
                 dep_alpha=dep_alpha,
                 time_vec=time_vec,
                 appliedE=applied_field,
-                init='pr'
+                defects=defects,
+                init=init_mode
             )
             
             self.simulations[sim_id] = {
@@ -194,6 +389,18 @@ class SimulationManager:
             }
             for sim_id, data in self.simulations.items()
         ]
+    
+    def visualize_simulation(self, sim_id: str, viz_type: str = 'summary', timestep: int = -1) -> str:
+        """Generate visualization for a completed simulation"""
+        if sim_id not in self.simulations:
+            raise ValueError(f"Simulation {sim_id} not found")
+        
+        sim_data = self.simulations[sim_id]
+        if sim_data['status'] != 'completed':
+            raise ValueError(f"Simulation not completed yet")
+        
+        sim = sim_data['sim']
+        return generate_visualization(sim, viz_type, timestep)
 
 # ============================================================================
 # Comparison Tools - Minimal Implementation
@@ -235,7 +442,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="initialize_simulation",
-            description="Create a new FerroSim simulation with specified parameters",
+            description="Create a new FerroSim simulation with basic or advanced parameters. Supports custom electric fields, defects, and ground state calculations.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -264,6 +471,43 @@ async def list_tools() -> list[types.Tool]:
                         "type": "number",
                         "description": "Depolarization constant",
                         "default": 0.0
+                    },
+                    "init": {
+                        "type": "string",
+                        "description": "Initial condition: 'pr' (positive remnant), 'random' (for ground states), 'up', 'down'",
+                        "enum": ["pr", "random", "up", "down"],
+                        "default": "pr"
+                    },
+                    "t_start": {
+                        "type": "number",
+                        "description": "Start time",
+                        "default": 0.0
+                    },
+                    "t_end": {
+                        "type": "number",
+                        "description": "End time",
+                        "default": 1.0
+                    },
+                    "n_steps": {
+                        "type": "integer",
+                        "description": "Number of time steps",
+                        "default": 1000
+                    },
+                    "field_config": {
+                        "type": "object",
+                        "description": "Electric field configuration: {type: 'sine'|'step'|'polynomial'|'zero', params: {...}}",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "params": {"type": "object"}
+                        }
+                    },
+                    "defect_config": {
+                        "type": "object",
+                        "description": "Defect configuration: {type: 'none'|'random'|'periodic', params: {...}}",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "params": {"type": "object"}
+                        }
                     }
                 },
                 "required": []
@@ -344,6 +588,32 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {},
                 "required": []
             }
+        ),
+        
+        types.Tool(
+            name="visualize_simulation",
+            description="Generate visualization (plot) of a completed simulation. Returns base64-encoded PNG image.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sim_id": {
+                        "type": "string",
+                        "description": "Simulation ID"
+                    },
+                    "viz_type": {
+                        "type": "string",
+                        "description": "Visualization type: 'summary' (full evolution), 'quiver' (vector field), 'magnitude_angle' (polarization magnitude and angle)",
+                        "enum": ["summary", "quiver", "magnitude_angle"],
+                        "default": "summary"
+                    },
+                    "timestep": {
+                        "type": "integer",
+                        "description": "Timestep to visualize (-1 for final state)",
+                        "default": -1
+                    }
+                },
+                "required": ["sim_id"]
+            }
         )
     ]
 
@@ -403,6 +673,21 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         elif name == "list_simulations":
             result = {
                 "simulations": sim_manager.list_simulations()
+            }
+            
+        elif name == "visualize_simulation":
+            viz_type = arguments.get('viz_type', 'summary')
+            timestep = arguments.get('timestep', -1)
+            img_base64 = sim_manager.visualize_simulation(
+                arguments['sim_id'],
+                viz_type=viz_type,
+                timestep=timestep
+            )
+            result = {
+                "sim_id": arguments['sim_id'],
+                "visualization_type": viz_type,
+                "image_base64": img_base64,
+                "message": f"Generated {viz_type} visualization. Display using: data:image/png;base64,{{image_base64}}"
             }
             
         else:
