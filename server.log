@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/Users/guanlinhe/miniconda3/envs/ferrosim_mcp/lib/python3.11/site-packages/DTMicroscope/server/server_afm.py", line 339, in <module>
+    main_server()
+  File "/Users/guanlinhe/miniconda3/envs/ferrosim_mcp/lib/python3.11/site-packages/DTMicroscope/server/server_afm.py", line 331, in main_server
+    daemon = Pyro5.api.Daemon( port=9092)  #9092=AFM, 9091 = STEM
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/guanlinhe/miniconda3/envs/ferrosim_mcp/lib/python3.11/site-packages/Pyro5/server.py", line 237, in __init__
+    self.transportServer.init(self, host, port, unixsocket)
+  File "/Users/guanlinhe/miniconda3/envs/ferrosim_mcp/lib/python3.11/site-packages/Pyro5/svr_threads.py", line 124, in init
+    self.sock = socketutil.create_socket(bind=bind_location,
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/guanlinhe/miniconda3/envs/ferrosim_mcp/lib/python3.11/site-packages/Pyro5/socketutil.py", line 278, in create_socket
+    sock.bind(bind)
+OSError: [Errno 48] Address already in use
