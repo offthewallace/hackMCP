@@ -14,44 +14,53 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Check Python version
-echo "Checking Python version..."
-python_version=$(python3 --version 2>&1 | awk '{print $2}')
-echo "Found Python $python_version"
+# Check if conda is installed
+echo "Checking for conda..."
+if ! command -v conda &> /dev/null; then
+    echo -e "${RED}✗ conda not found. Please install Anaconda or Miniconda first.${NC}"
+    echo "Download from: https://docs.conda.io/en/latest/miniconda.html"
+    exit 1
+fi
+echo -e "${GREEN}✓ conda found${NC}"
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo -e "${YELLOW}Creating virtual environment...${NC}"
-    python3 -m venv venv
-    echo -e "${GREEN}✓ Virtual environment created${NC}"
+# Set conda environment name
+ENV_NAME="ferrosim_mcp"
+
+# Check if conda environment exists
+if conda env list | grep -q "^${ENV_NAME} "; then
+    echo -e "${GREEN}✓ Conda environment '${ENV_NAME}' already exists${NC}"
 else
-    echo -e "${GREEN}✓ Virtual environment already exists${NC}"
+    echo -e "${YELLOW}Creating conda environment '${ENV_NAME}'...${NC}"
+    conda create -n ${ENV_NAME} python=3.11 -y
+    echo -e "${GREEN}✓ Conda environment created${NC}"
 fi
 
-# Activate virtual environment
-echo "Activating virtual environment..."
-source venv/bin/activate
+# Activate conda environment
+echo "Activating conda environment '${ENV_NAME}'..."
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate ${ENV_NAME}
 
 # Upgrade pip
 echo "Upgrading pip..."
-pip install --upgrade pip > /dev/null 2>&1
+pip install --upgrade pip --quiet
 
 # Install dependencies
 echo -e "${YELLOW}Installing dependencies...${NC}"
+
 echo "  - anthropic"
-pip install anthropic > /dev/null 2>&1
+pip install anthropic --quiet || { echo -e "${RED}✗ Failed to install anthropic${NC}"; exit 1; }
 
 echo "  - mcp"
-pip install mcp > /dev/null 2>&1
+pip install mcp --quiet || { echo -e "${RED}✗ Failed to install mcp${NC}"; exit 1; }
 
 echo "  - numpy, matplotlib, scipy"
-pip install numpy matplotlib scipy > /dev/null 2>&1
+pip install numpy matplotlib scipy --quiet || { echo -e "${RED}✗ Failed to install numpy/matplotlib/scipy${NC}"; exit 1; }
 
 echo "  - tqdm, numba"
-pip install tqdm numba > /dev/null 2>&1
+pip install tqdm numba --quiet || { echo -e "${RED}✗ Failed to install tqdm/numba${NC}"; exit 1; }
 
 echo "  - FerroSim (from GitHub)"
-pip install git+https://github.com/ramav87/FerroSim.git@rama-dev > /dev/null 2>&1
+pip install git+https://github.com/ramav87/FerroSim.git@rama-dev --quiet || { echo -e "${RED}✗ Failed to install FerroSim${NC}"; exit 1; }
 
 echo -e "${GREEN}✓ All dependencies installed${NC}"
 
@@ -156,16 +165,19 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "What to do next:"
     echo ""
-    echo "1. Read the documentation:"
+    echo "1. Activate the conda environment (if not already active):"
+    echo "   conda activate ferrosim_mcp"
+    echo ""
+    echo "2. Read the documentation:"
     echo "   cat README.md"
     echo ""
-    echo "2. Start the MCP server:"
+    echo "3. Start the MCP server:"
     echo "   python ferrosim_mcp_server_minimal.py"
     echo ""
-    echo "3. Run the demo workflow:"
+    echo "4. Run the demo workflow:"
     echo "   python test_agent_workflow.py"
     echo ""
-    echo "4. Set your API key (for Claude integration):"
+    echo "5. Set your API key (for Claude integration):"
     echo "   export ANTHROPIC_API_KEY='your-key-here'"
     echo ""
     echo "For detailed instructions, see:"

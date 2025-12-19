@@ -41,9 +41,10 @@ def generate_mock_afm_domains(n=20, noise_level=0.05, save_path=None):
     results = sim.runSim(calc_pr=False, verbose=False)
     
     # Get final polarization state
-    pmat = sim.getPmat(timestep=-1)
-    px = pmat[0, :, :]
-    py = pmat[1, :, :]
+    pmat = sim.getPmat()  # Returns shape: (2, timesteps, n, n)
+    pmat_final = pmat[:, -1, :, :]  # Get last timestep: (2, n, n)
+    px = pmat_final[0, :, :]
+    py = pmat_final[1, :, :]
     
     # Convert to AFM-like signals
     # Amplitude: related to polarization magnitude
@@ -140,10 +141,11 @@ def generate_mock_afm_with_defects(n=20, defect_strength=0.5, num_defects=5, noi
     )
     
     results = sim.runSim(calc_pr=False, verbose=False)
-    pmat = sim.getPmat(timestep=-1)
+    pmat = sim.getPmat()  # Returns shape: (2, timesteps, n, n)
+    pmat_final = pmat[:, -1, :, :]  # Get last timestep: (2, n, n)
     
-    px = pmat[0, :, :]
-    py = pmat[1, :, :]
+    px = pmat_final[0, :, :]
+    py = pmat_final[1, :, :]
     amplitude = np.sqrt(px**2 + py**2)
     phase = np.arctan2(py, px)
     

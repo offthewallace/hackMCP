@@ -4,12 +4,24 @@ Minimal FerroSim MCP Server - Quick Start Template
 Run this to test basic MCP server functionality
 """
 
+import os
 import asyncio
 import json
 import sys
 import uuid
+import warnings
 from typing import Dict, Any
 import numpy as np
+
+# Set environment variables before importing numba/scipy
+os.environ['NUMBA_DISABLE_JIT'] = '0'  # Keep JIT enabled but controlled
+os.environ['NUMBA_NUM_THREADS'] = '1'  # Single thread to avoid semaphore issues
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+
+# Suppress warnings that could interfere with JSON-RPC
+warnings.filterwarnings('ignore')
 
 # Import MCP SDK
 try:
@@ -27,6 +39,18 @@ except ImportError:
     print("Install FerroSim: pip install git+https://github.com/ramav87/FerroSim.git@rama-dev", 
           file=sys.stderr)
     sys.exit(1)
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def safe_serialize(obj):
+    """Convert numpy arrays to JSON-safe lists, handling NaN/Inf"""
+    if isinstance(obj, np.ndarray):
+        # Replace NaN and Inf with None for JSON safety
+        obj = np.nan_to_num(obj, nan=0.0, posinf=1e10, neginf=-1e10)
+        return obj.tolist()
+    return obj
 
 # ============================================================================
 # Simulation Manager - Minimal Implementation
@@ -97,20 +121,32 @@ class SimulationManager:
         sim = sim_data['sim']
         
         try:
-            # Run simulation
-            results = sim.runSim(calc_pr=False, verbose=verbose)
-            sim_data['results'] = results
-            sim_data['status'] = 'completed'
+            # Redirect stdout to stderr temporarily to prevent progress bars
+            # from interfering with JSON-RPC protocol
+            import sys
+            old_stdout = sys.stdout
+            if verbose:
+                sys.stdout = sys.stderr
+            
+            try:
+                # Run simulation
+                results = sim.runSim(calc_pr=False, verbose=verbose)
+                sim_data['results'] = results
+                sim_data['status'] = 'completed'
+            finally:
+                # Restore stdout
+                sys.stdout = old_stdout
             
             # Get final polarization map
-            pmat = sim.getPmat(timestep=-1)
+            pmat = sim.getPmat()  # Returns shape: (2, timesteps, n, n)
+            pmat_final = pmat[:, -1, :, :]  # Get last timestep: (2, n, n)
             
             return {
                 'sim_id': sim_id,
                 'status': 'completed',
-                'total_polarization': results['Polarization'].tolist(),
-                'final_Px': pmat[0, :, :].tolist(),
-                'final_Py': pmat[1, :, :].tolist()
+                'total_polarization': safe_serialize(results['Polarization']),
+                'final_Px': safe_serialize(pmat_final[0, :, :]),
+                'final_Py': safe_serialize(pmat_final[1, :, :])
             }
             
         except Exception as e:
@@ -127,14 +163,26 @@ class SimulationManager:
             raise ValueError(f"Simulation not completed yet")
         
         sim = sim_data['sim']
-        pmat = sim.getPmat(timestep=timestep)
+        pmat = sim.getPmat()  # Returns shape: (2, timesteps, n, n)
         
-        return {
-            'sim_id': sim_id,
-            'timestep': timestep,
-            'Px': pmat[0, :, :].tolist() if timestep is not None else pmat[0, :, :, :].tolist(),
-            'Py': pmat[1, :, :].tolist() if timestep is not None else pmat[1, :, :, :].tolist(),
-        }
+        if timestep == -1:
+            # Get last timestep
+            pmat_result = pmat[:, -1, :, :]
+            return {
+                'sim_id': sim_id,
+                'timestep': timestep,
+                'Px': safe_serialize(pmat_result[0, :, :]),
+                'Py': safe_serialize(pmat_result[1, :, :]),
+            }
+        else:
+            # Get specific timestep
+            pmat_result = pmat[:, timestep, :, :]
+            return {
+                'sim_id': sim_id,
+                'timestep': timestep,
+                'Px': safe_serialize(pmat_result[0, :, :]),
+                'Py': safe_serialize(pmat_result[1, :, :]),
+            }
     
     def list_simulations(self) -> list:
         """List all simulations"""
@@ -380,13 +428,27 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def main():
     """Run the MCP server"""
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(
+                read_stream,
+                write_stream,
+                app.create_initialization_options()
+            )
+    except KeyboardInterrupt:
+        print("Server interrupted by user", file=sys.stderr)
+    except Exception as e:
+        print(f"Server error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        raise
 
 if __name__ == "__main__":
     print("Starting FerroSim MCP Server...", file=sys.stderr)
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Server shutdown", file=sys.stderr)
+    except Exception as e:
+        print(f"Fatal error: {e}", file=sys.stderr)
+        sys.exit(1)

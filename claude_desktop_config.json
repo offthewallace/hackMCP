@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ferrosim": {
+      "command": "/Users/guanlinhe/miniconda3/envs/ferrosim_mcp/bin/python",
+      "args": [
+        "/Users/guanlinhe/github/hackMCP/ferrosim_mcp_server_minimal.py"
+      ],
+      "env": {}
+    }
+  }
+}
+
