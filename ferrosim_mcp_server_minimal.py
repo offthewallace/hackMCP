@@ -10,6 +10,7 @@ import json
 import sys
 import uuid
 import warnings
+from datetime import datetime
 from typing import Dict, Any
 import numpy as np
 
@@ -39,6 +40,14 @@ except ImportError:
     print("Install FerroSim: pip install git+https://github.com/ramav87/FerroSim.git@rama-dev", 
           file=sys.stderr)
     sys.exit(1)
+
+# Import AFM Digital Twin
+try:
+    from afm_digital_twin import AFMDigitalTwin
+    AFM_AVAILABLE = True
+except ImportError:
+    AFM_AVAILABLE = False
+    print("Warning: AFM Digital Twin not available. AFM tools will be unavailable.", file=sys.stderr)
 
 # ============================================================================
 # Helper Functions
@@ -186,23 +195,23 @@ def generate_defects(defect_type: str, n: int, params: dict) -> list:
 # Visualization Generation
 # ============================================================================
 
-def generate_visualization(sim: Ferro2DSim, viz_type: str, timestep: int = -1) -> str:
+def generate_visualization(sim: Ferro2DSim, viz_type: str, timestep: int = -1, sim_id: str = "sim") -> str:
     """
-    Generate visualization and return as base64-encoded PNG
+    Generate visualization and save to display_demo folder
     
     Args:
         sim: FerroSim simulation object
         viz_type: 'summary', 'quiver', 'magnitude_angle'
         timestep: Which timestep to visualize (-1 for last)
+        sim_id: Simulation ID for filename
         
     Returns:
-        base64_image: Base64-encoded PNG image
+        filepath: Path to saved PNG file
     """
     import matplotlib
     matplotlib.use('Agg')  # Non-interactive backend
     import matplotlib.pyplot as plt
-    import io
-    import base64
+    from datetime import datetime
     
     # Create figure based on visualization type
     if viz_type == 'summary':
@@ -217,14 +226,21 @@ def generate_visualization(sim: Ferro2DSim, viz_type: str, timestep: int = -1) -
     else:
         raise ValueError(f"Unknown visualization type: {viz_type}")
     
-    # Convert to base64-encoded PNG
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-    buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    # Get absolute path to display_demo folder (relative to this script)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, "display_demo")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{sim_id}_{viz_type}_{timestamp}.png"
+    filepath = os.path.join(output_dir, filename)
+    
+    # Save to file
+    plt.savefig(filepath, format='png', dpi=150, bbox_inches='tight')
     plt.close(fig)
     
-    return img_base64
+    return filepath
 
 # ============================================================================
 # Simulation Manager - Minimal Implementation
@@ -391,7 +407,7 @@ class SimulationManager:
         ]
     
     def visualize_simulation(self, sim_id: str, viz_type: str = 'summary', timestep: int = -1) -> str:
-        """Generate visualization for a completed simulation"""
+        """Generate visualization for a completed simulation and save to file"""
         if sim_id not in self.simulations:
             raise ValueError(f"Simulation {sim_id} not found")
         
@@ -400,33 +416,7 @@ class SimulationManager:
             raise ValueError(f"Simulation not completed yet")
         
         sim = sim_data['sim']
-        return generate_visualization(sim, viz_type, timestep)
-
-# ============================================================================
-# Comparison Tools - Minimal Implementation
-# ============================================================================
-
-def compare_with_afm(sim_data: np.ndarray, afm_data: np.ndarray) -> dict:
-    """Compare simulation with AFM data"""
-    # Ensure same shape
-    if sim_data.shape != afm_data.shape:
-        raise ValueError(f"Shape mismatch: sim {sim_data.shape} vs AFM {afm_data.shape}")
-    
-    # Calculate metrics
-    mse = np.mean((sim_data - afm_data) ** 2)
-    correlation = np.corrcoef(sim_data.flatten(), afm_data.flatten())[0, 1]
-    
-    # Normalized RMSE
-    rmse = np.sqrt(mse)
-    nrmse = rmse / (np.max(afm_data) - np.min(afm_data))
-    
-    return {
-        'mse': float(mse),
-        'rmse': float(rmse),
-        'nrmse': float(nrmse),
-        'correlation': float(correlation),
-        'similarity_score': float(correlation)  # Use correlation as main score
-    }
+        return generate_visualization(sim, viz_type, timestep, sim_id)
 
 # ============================================================================
 # MCP Server Setup
@@ -436,10 +426,16 @@ def compare_with_afm(sim_data: np.ndarray, afm_data: np.ndarray) -> dict:
 app = Server("ferrosim-mcp-server")
 sim_manager = SimulationManager()
 
+# Initialize AFM manager
+if AFM_AVAILABLE:
+    afm_manager = AFMDigitalTwin()
+else:
+    afm_manager = None
+
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
     """List available MCP tools"""
-    return [
+    tools = [
         types.Tool(
             name="initialize_simulation",
             description="Create a new FerroSim simulation with basic or advanced parameters. Supports custom electric fields, defects, and ground state calculations.",
@@ -554,31 +550,6 @@ async def list_tools() -> list[types.Tool]:
             }
         ),
         
-        types.Tool(
-            name="compare_with_afm_data",
-            description="Compare simulation results with AFM experimental data",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "sim_id": {
-                        "type": "string",
-                        "description": "Simulation ID"
-                    },
-                    "afm_data": {
-                        "type": "array",
-                        "description": "AFM data as 2D array (flattened)",
-                        "items": {"type": "number"}
-                    },
-                    "component": {
-                        "type": "string",
-                        "description": "Which polarization component to compare",
-                        "enum": ["x", "y", "magnitude"],
-                        "default": "magnitude"
-                    }
-                },
-                "required": ["sim_id", "afm_data"]
-            }
-        ),
         
         types.Tool(
             name="list_simulations",
@@ -590,9 +561,9 @@ async def list_tools() -> list[types.Tool]:
             }
         ),
         
-        types.Tool(
-            name="visualize_simulation",
-            description="Generate visualization (plot) of a completed simulation. Returns base64-encoded PNG image.",
+            types.Tool(
+                name="visualize_simulation",
+                description="Generate visualization (plot) of a completed simulation and save to display_demo folder. Returns filepath to saved PNG.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -616,6 +587,98 @@ async def list_tools() -> list[types.Tool]:
             }
         )
     ]
+    
+    # ========================================================================
+    # AFM Digital Twin Tools (Experiment Side)
+    # ========================================================================
+    
+    if AFM_AVAILABLE and afm_manager:
+        tools.extend([
+            types.Tool(
+                name="afm_load_real_scan",
+                description="Load real AFM scan data from file (.ibw, .h5, .npy, .mat, .txt formats). Primary method to load experimental data.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "filepath": {
+                            "type": "string",
+                            "description": "Path to AFM data file"
+                        },
+                        "data_format": {
+                            "type": "string",
+                            "description": "File format (auto-detected if not specified)",
+                            "enum": ["ibw", "h5", "npy", "mat", "txt"]
+                        }
+                    },
+                    "required": ["filepath"]
+                }
+            ),
+            types.Tool(
+                name="afm_analyze_domains",
+                description="Analyze ferroelectric domain structure from loaded AFM scan. Returns domain areas, counts, and wall density.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "scan_id": {
+                            "type": "string",
+                            "description": "Scan identifier (optional, uses current scan if not specified)"
+                        }
+                    }
+                }
+            ),
+            types.Tool(
+                name="afm_get_piezoresponse",
+                description="Get PFM amplitude and phase statistics from loaded AFM scan. Returns summary statistics by default to avoid large data transfer.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "scan_id": {
+                            "type": "string",
+                            "description": "Scan identifier (optional, uses current scan if not specified)"
+                        },
+                        "include_data": {
+                            "type": "boolean",
+                            "description": "Include downsampled arrays (default: false, only statistics)",
+                            "default": False
+                        }
+                    }
+                }
+            )
+        ])
+    
+    # ========================================================================
+    # Theory-Experiment Matching Tools
+    # ========================================================================
+    
+    if AFM_AVAILABLE and afm_manager:
+        tools.append(
+            types.Tool(
+                name="match_simulation_to_afm",
+                description="Compare FerroSim simulation results with AFM experimental data. Returns correlation, MSE, RMSE, and match quality assessment.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "sim_id": {
+                            "type": "string",
+                            "description": "Simulation ID from FerroSim"
+                        },
+                        "scan_id": {
+                            "type": "string",
+                            "description": "AFM scan ID"
+                        },
+                        "component": {
+                            "type": "string",
+                            "description": "Polarization component to compare: 'magnitude', 'x', 'y'",
+                            "enum": ["magnitude", "x", "y"],
+                            "default": "magnitude"
+                        }
+                    },
+                    "required": ["sim_id", "scan_id"]
+                }
+            )
+        )
+    
+    return tools
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
@@ -642,34 +705,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 timestep=arguments.get('timestep', -1)
             )
             
-        elif name == "compare_with_afm_data":
-            # Get simulation results
-            sim_id = arguments['sim_id']
-            sim_results = sim_manager.get_results(sim_id, timestep=-1)
-            
-            # Extract component
-            component = arguments.get('component', 'magnitude')
-            if component == 'x':
-                sim_data = np.array(sim_results['Px'])
-            elif component == 'y':
-                sim_data = np.array(sim_results['Py'])
-            else:  # magnitude
-                px = np.array(sim_results['Px'])
-                py = np.array(sim_results['Py'])
-                sim_data = np.sqrt(px**2 + py**2)
-            
-            # Reshape AFM data
-            afm_data = np.array(arguments['afm_data'])
-            n = int(np.sqrt(len(afm_data)))
-            afm_data = afm_data.reshape(n, n)
-            
-            # Compare
-            comparison = compare_with_afm(sim_data, afm_data)
-            result = {
-                "sim_id": sim_id,
-                "comparison": comparison
-            }
-            
         elif name == "list_simulations":
             result = {
                 "simulations": sim_manager.list_simulations()
@@ -678,17 +713,185 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         elif name == "visualize_simulation":
             viz_type = arguments.get('viz_type', 'summary')
             timestep = arguments.get('timestep', -1)
-            img_base64 = sim_manager.visualize_simulation(
+            filepath = sim_manager.visualize_simulation(
                 arguments['sim_id'],
                 viz_type=viz_type,
                 timestep=timestep
             )
             result = {
+                "success": True,
                 "sim_id": arguments['sim_id'],
                 "visualization_type": viz_type,
-                "image_base64": img_base64,
-                "message": f"Generated {viz_type} visualization. Display using: data:image/png;base64,{{image_base64}}"
+                "filepath": filepath,
+                "message": f"Generated {viz_type} visualization and saved to: {filepath}"
             }
+        
+        # ====================================================================
+        # AFM Digital Twin Tools
+        # ====================================================================
+        
+        elif name == "afm_load_real_scan":
+            if not AFM_AVAILABLE or not afm_manager:
+                result = {"error": "AFM Digital Twin not available"}
+            else:
+                filepath = arguments['filepath']
+                data_format = arguments.get('data_format', None)
+                
+                try:
+                    result = afm_manager.load_data(filepath, data_format)
+                    result['success'] = True
+                    result['message'] = f"Loaded AFM data from {filepath}"
+                except Exception as e:
+                    result = {
+                        "success": False,
+                        "error": str(e),
+                        "message": f"Failed to load AFM file: {filepath}"
+                    }
+        
+        elif name == "afm_analyze_domains":
+            if not AFM_AVAILABLE or not afm_manager:
+                result = {"error": "AFM Digital Twin not available"}
+            else:
+                scan_id = arguments.get('scan_id', None)
+                try:
+                    result = afm_manager.analyze_domain_structure(scan_id)
+                    result['success'] = True
+                except Exception as e:
+                    result = {"success": False, "error": str(e)}
+        
+        elif name == "afm_get_piezoresponse":
+            if not AFM_AVAILABLE or not afm_manager:
+                result = {"error": "AFM Digital Twin not available"}
+            else:
+                scan_id = arguments.get('scan_id', None)
+                include_data = arguments.get('include_data', False)
+                try:
+                    pfm_data = afm_manager.get_piezoresponse(scan_id)
+                    
+                    # Convert to numpy for statistics
+                    amplitude = np.array(pfm_data['amplitude'])
+                    phase = np.array(pfm_data['phase'])
+                    
+                    # Return only statistics by default
+                    result = {
+                        'success': True,
+                        'scan_id': pfm_data['scan_id'],
+                        'amplitude_stats': {
+                            'shape': list(amplitude.shape),
+                            'min': float(amplitude.min()),
+                            'max': float(amplitude.max()),
+                            'mean': float(amplitude.mean()),
+                            'std': float(amplitude.std()),
+                            'median': float(np.median(amplitude))
+                        },
+                        'phase_stats': {
+                            'shape': list(phase.shape),
+                            'min': float(phase.min()),
+                            'max': float(phase.max()),
+                            'mean': float(phase.mean()),
+                            'std': float(phase.std()),
+                            'median': float(np.median(phase))
+                        },
+                        'params': pfm_data['params']
+                    }
+                    
+                    # Only include full data if explicitly requested
+                    if include_data:
+                        # Downsample if too large (> 64x64)
+                        if amplitude.shape[0] > 64:
+                            from scipy.ndimage import zoom
+                            factor = 64 / amplitude.shape[0]
+                            amplitude_small = zoom(amplitude, factor, order=1)
+                            phase_small = zoom(phase, factor, order=1)
+                            result['amplitude_data'] = amplitude_small.tolist()
+                            result['phase_data'] = phase_small.tolist()
+                            result['note'] = f"Data downsampled from {amplitude.shape} to {amplitude_small.shape} for transfer"
+                        else:
+                            result['amplitude_data'] = amplitude.tolist()
+                            result['phase_data'] = phase.tolist()
+                    
+                except Exception as e:
+                    result = {"success": False, "error": str(e)}
+        
+        
+        # ====================================================================
+        # Theory-Experiment Matching
+        # ====================================================================
+        
+        elif name == "match_simulation_to_afm":
+            if not AFM_AVAILABLE or not afm_manager:
+                result = {"error": "AFM Digital Twin not available"}
+            else:
+                # Get simulation results
+                sim_id = arguments['sim_id']
+                scan_id = arguments['scan_id']
+                component = arguments.get('component', 'magnitude')
+                
+                sim_results = sim_manager.get_results(sim_id, timestep=-1)
+                
+                # Extract simulation data based on component
+                if component == 'x':
+                    sim_data = np.array(sim_results['Px'])
+                elif component == 'y':
+                    sim_data = np.array(sim_results['Py'])
+                else:  # magnitude
+                    px = np.array(sim_results['Px'])
+                    py = np.array(sim_results['Py'])
+                    sim_data = np.sqrt(px**2 + py**2)
+                
+                # Get AFM data
+                afm_results = afm_manager.get_piezoresponse(scan_id)
+                afm_amplitude = np.array(afm_results['amplitude'])
+                
+                # Resize simulation to match AFM resolution
+                if sim_data.shape != afm_amplitude.shape:
+                    from scipy.ndimage import zoom
+                    zoom_factor = afm_amplitude.shape[0] / sim_data.shape[0]
+                    sim_data_resized = zoom(sim_data, zoom_factor, order=1)
+                else:
+                    sim_data_resized = sim_data
+                
+                # Normalize both to [0, 1] range for fair comparison
+                sim_norm = (sim_data_resized - sim_data_resized.min()) / (sim_data_resized.max() - sim_data_resized.min() + 1e-10)
+                afm_norm = (afm_amplitude - afm_amplitude.min()) / (afm_amplitude.max() - afm_amplitude.min() + 1e-10)
+                
+                # Calculate comparison metrics
+                correlation = float(np.corrcoef(
+                    sim_norm.flatten(),
+                    afm_norm.flatten()
+                )[0, 1])
+                
+                mse = float(np.mean((sim_norm - afm_norm) ** 2))
+                rmse = float(np.sqrt(mse))
+                nrmse = rmse  # Already normalized
+                
+                # Structural similarity (if available)
+                try:
+                    from skimage.metrics import structural_similarity as ssim
+                    ssim_score = float(ssim(sim_norm, afm_norm, data_range=1.0))
+                except ImportError:
+                    ssim_score = None
+                
+                result = {
+                    "success": True,
+                    "sim_id": sim_id,
+                    "scan_id": scan_id,
+                    "component": component,
+                    "correlation": correlation,
+                    "mse": mse,
+                    "rmse": rmse,
+                    "nrmse": nrmse,
+                    "ssim": ssim_score,
+                    "match_quality": (
+                        "excellent" if correlation > 0.9 else
+                        "good" if correlation > 0.8 else
+                        "fair" if correlation > 0.7 else
+                        "poor"
+                    ),
+                    "sim_shape": list(sim_data.shape),
+                    "afm_shape": list(afm_amplitude.shape),
+                    "message": f"Theory-experiment matching complete. Correlation: {correlation:.3f}, Quality: {result.get('match_quality', 'N/A')}"
+                }
             
         else:
             result = {"error": f"Unknown tool: {name}"}
