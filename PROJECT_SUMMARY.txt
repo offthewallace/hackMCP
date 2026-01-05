@@ -1,0 +1,131 @@
+Agentic Workflow for AFM Digital Twin with Theory-Experiment Integration
+
+Guanlin He¹, Yongwen Sun¹
+
+¹[Your Institution/Laboratory]
+
+Abstract
+
+Foundation models and agentic workflows offer transformative potential for accelerating 
+materials science research by bridging the gap between theoretical simulations and 
+experimental observations. In this work, we present an integrated system that combines 
+ferroelectric domain simulations (FerroSim) with real Atomic Force Microscopy (AFM) 
+experimental data analysis through the Model Context Protocol (MCP). Traditional AFM 
+workflows often require manual switching between simulation tools, data analysis software, 
+and experimental control interfaces, leading to inefficiencies and difficulties in 
+theory-experiment comparison. Here, we introduce FerroSim-AFM MCP Server, an automated 
+workflow that integrates ferroelectric domain theory simulations with multi-format AFM 
+experimental data processing, enabling AI-driven comparative analysis and decision-making.
+
+Our system builds upon the DTMicroscope Digital Twin framework [8] and leverages Claude's 
+foundation model capabilities through MCP to provide a unified interface for: (1) running 
+physics-based FerroSim simulations with configurable electric fields, defects, and material 
+properties; (2) loading and analyzing real AFM data from multiple experimental formats 
+(Igor .ibw, HDF5/USID, NumPy, MATLAB, text files); (3) automated theory-experiment 
+matching with quantitative metrics (correlation, MSE, RMSE); and (4) natural language-driven 
+workflow orchestration enabling domain scientists to interact with complex experimental and 
+simulation tools conversationally.
+
+The workflow demonstrates enhanced reproducibility in ferroelectric materials characterization, 
+reduces manual effort in data format conversion and analysis, and facilitates rapid iteration 
+between theoretical predictions and experimental validation. By exposing both simulation and 
+experimental capabilities through a standardized MCP interface, this approach enables 
+foundation models to reason about physical systems, suggest parameter adjustments, and 
+guide experimental design based on theory-experiment discrepancies.
+
+Methodology
+
+The system architecture consists of three primary components orchestrated through MCP 
+(Figure 1):
+
+1. FerroSim Theory Engine: Implements phase-field simulations of ferroelectric domain 
+evolution using the FerroSim library [9]. The engine supports initialization of domain 
+structures, application of external electric fields, introduction of defects (charged, 
+elastic, electrostatic), and time-evolution of polarization dynamics. Simulation outputs 
+include polarization field maps, domain statistics, and energy landscapes.
+
+2. AFM Digital Twin: A unified data loader and analyzer supporting multiple experimental 
+AFM data formats commonly used in ferroelectric characterization. The module automatically 
+detects file formats and extracts Piezoresponse Force Microscopy (PFM) amplitude and phase 
+channels. Key capabilities include:
+   - Multi-format data loading with automatic channel detection
+   - Domain structure analysis (up/down domain quantification, wall density metrics)
+   - Piezoresponse signal extraction and processing
+   - DTMicroscope-compatible API for integration with existing tools
+   - Line-by-line scanning emulation for progressive data analysis
+
+3. Theory-Experiment Matching Layer: Implements automated comparison between simulation 
+outputs and experimental AFM data using multiple quantitative metrics. The matching 
+algorithm accounts for scale differences, performs spatial alignment when needed, and 
+computes correlation coefficients, mean squared error, and root mean squared error to 
+assess theory-experiment agreement.
+
+The workflow is exposed through 15 MCP tools that enable foundation models to:
+- Initialize and configure ferroelectric simulations with specific material parameters
+- Load experimental AFM scans from laboratory instruments
+- Analyze domain structures in both simulated and experimental data
+- Compare theoretical predictions with experimental observations
+- Visualize results with automated plot generation
+- Iterate parameters based on theory-experiment discrepancies
+
+Each tool provides structured JSON responses with metadata, enabling the AI agent to 
+reason about results and suggest next steps. The system maintains state across multiple 
+scans and simulations, allowing for comparative studies and parameter space exploration.
+
+Integration with Claude Desktop through MCP enables natural language interaction with 
+the entire workflow. Domain scientists can request complex multi-step analyses (e.g., 
+"Load the experimental scan, run a simulation with similar parameters, and compare the 
+domain wall densities") without writing code or manually switching between tools. The 
+foundation model interprets requests, orchestrates appropriate tool calls, analyzes 
+results, and provides scientific insights based on theory-experiment comparisons.
+
+Results and Discussion
+
+The integrated workflow has been validated on real PFM data from ferroelectric thin films, 
+demonstrating successful loading of Igor Binary Wave (.ibw) files and HDF5/USID format data 
+from DTMicroscope [8]. Automated domain analysis correctly identifies up/down domain regions 
+based on phase information and computes physically meaningful metrics (domain areas in μm², 
+wall density). Theory-experiment matching successfully identifies parameter regimes where 
+simulations reproduce experimental domain patterns, with correlation coefficients and MSE 
+values providing quantitative goodness-of-fit measures.
+
+The agentic workflow significantly reduces the manual effort required for theory-experiment 
+iteration. Traditional workflows might require: (1) running simulations in one environment, 
+(2) loading experimental data in separate analysis software, (3) manually exporting and 
+formatting data for comparison, (4) writing custom scripts for metric calculation, and 
+(5) repeating the process with adjusted parameters. Our integrated system enables this 
+entire cycle through natural language interaction, with the foundation model handling tool 
+orchestration, data format conversions, and initial interpretation of results.
+
+The modular architecture supports extensibility for additional analysis methods. The 
+DTMicroscope-compatible API design enables integration with existing Python-based microscopy 
+analysis workflows, while the MCP interface allows incorporation of external tools (machine 
+learning models, advanced image analysis, simulation optimization algorithms) as new tools 
+become available.
+
+Future work will focus on: (1) implementing closed-loop optimization where AI agents 
+automatically adjust simulation parameters to match experimental data, (2) incorporating 
+machine learning models for rapid theory-experiment matching, (3) extending support for 
+time-resolved PFM data to compare dynamic switching behavior, and (4) developing multi-modal 
+analysis combining AFM with complementary characterization techniques.
+
+Conclusion
+
+We have demonstrated an agentic workflow for ferroelectric materials research that seamlessly 
+integrates physics-based simulations with experimental AFM data analysis. By leveraging MCP 
+and foundation models, this approach enables natural language-driven scientific workflows, 
+reduces manual data processing effort, and accelerates theory-experiment iteration cycles. 
+The open architecture and DTMicroscope compatibility facilitate community adoption and 
+extension for broader scanning probe microscopy applications.
+
+References
+
+[8] DTMicroscope Digital Twin Framework, https://github.com/pycroscopy/DTMicroscope
+[9] FerroSim: Phase-field simulations of ferroelectric domains, 
+    https://github.com/ramav87/FerroSim
+
+Acknowledgments
+
+This work was developed during the hackMCP hackathon. We thank the DTMicroscope and FerroSim 
+development teams for their open-source tools and the Anthropic team for the Model Context 
+Protocol framework.

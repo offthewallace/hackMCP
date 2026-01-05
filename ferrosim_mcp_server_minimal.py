@@ -44,6 +44,7 @@ except ImportError:
 # Import AFM Digital Twin
 try:
     from afm_digital_twin import AFMDigitalTwin
+    from afm_to_simulation_mapping import AFMParameterMapper
     AFM_AVAILABLE = True
 except ImportError:
     AFM_AVAILABLE = False
@@ -429,8 +430,10 @@ sim_manager = SimulationManager()
 # Initialize AFM manager
 if AFM_AVAILABLE:
     afm_manager = AFMDigitalTwin()
+    afm_mapper = AFMParameterMapper()
 else:
     afm_manager = None
+    afm_mapper = None
 
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -591,9 +594,28 @@ async def list_tools() -> list[types.Tool]:
     # ========================================================================
     # AFM Digital Twin Tools (Experiment Side)
     # ========================================================================
-    
+
     if AFM_AVAILABLE and afm_manager:
         tools.extend([
+            types.Tool(
+                name="afm_analyze_scan_parameters",
+                description="Analyze AFM scan and suggest matching FerroSim simulation parameters. Returns AFM metadata, suggested simulation parameters, and physical scaling information.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "filepath": {
+                            "type": "string",
+                            "description": "Path to AFM data file (.ibw, .h5, .npy, etc.)"
+                        },
+                        "data_format": {
+                            "type": "string",
+                            "description": "File format (auto-detected if not specified)",
+                            "enum": ["ibw", "h5", "npy", "mat", "txt"]
+                        }
+                    },
+                    "required": ["filepath"]
+                }
+            ),
             types.Tool(
                 name="afm_load_real_scan",
                 description="Load real AFM scan data from file (.ibw, .h5, .npy, .mat, .txt formats). Primary method to load experimental data.",
@@ -729,7 +751,34 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         # ====================================================================
         # AFM Digital Twin Tools
         # ====================================================================
-        
+
+        elif name == "afm_analyze_scan_parameters":
+            if not AFM_AVAILABLE or not afm_mapper:
+                result = {"error": "AFM Digital Twin not available"}
+            else:
+                filepath = arguments['filepath']
+                data_format = arguments.get('data_format', None)
+
+                try:
+                    analysis = afm_mapper.analyze_afm_scan(filepath, data_format)
+                    result = {
+                        "success": True,
+                        "filepath": filepath,
+                        "scan_id": analysis['afm']['scan_id'],
+                        "afm_parameters": analysis['afm'],
+                        "suggested_simulation_parameters": analysis['simulation'],
+                        "usage_note": "Use 'suggested_simulation_parameters' with initialize_simulation tool",
+                        "message": f"Analyzed AFM scan: {analysis['afm']['resolution']} pixels, "
+                                  f"{analysis['afm']['scan_size_x_um']:.2f}×{analysis['afm']['scan_size_y_um']:.2f} µm. "
+                                  f"Suggested simulation: {analysis['simulation']['n']}×{analysis['simulation']['n']} lattice."
+                    }
+                except Exception as e:
+                    result = {
+                        "success": False,
+                        "error": str(e),
+                        "message": f"Failed to analyze AFM scan: {filepath}"
+                    }
+
         elif name == "afm_load_real_scan":
             if not AFM_AVAILABLE or not afm_manager:
                 result = {"error": "AFM Digital Twin not available"}
